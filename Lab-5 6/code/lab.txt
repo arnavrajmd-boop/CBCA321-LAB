@@ -1,0 +1,67 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
+#include <errno.h>
+
+int main() {
+    // 1. Create cgroup directory
+    mkdir("/sys/fs/cgroup/mygroup", 0755);
+
+    // 2. Set CPU limit (20% of 1 core)
+    int fd = open("/sys/fs/cgroup/mygroup/cpu.max", O_WRONLY);
+    write(fd, "20000 100000", 12);
+    close(fd);
+
+    // 3. Set process limit to 1
+    fd = open("/sys/fs/cgroup/mygroup/pids.max", O_WRONLY);
+    write(fd, "1", 1);
+    close(fd);
+
+    printf("Cgroup configured with cpu.max=20%% and pids.max=1\n");
+
+    // 4. Fork child process
+    pid_t pid = fork();
+
+    if (pid == 0) {
+        // Child process
+        printf("Child 1 running with PID: %d\n", getpid());
+
+        // Try to fork a sub-process inside the cgroup
+        // Since pids.max is 1 and Child 1 already uses it, this fork MUST fail!
+        pid_t sub_child = fork();
+        if (sub_child < 0) {
+            printf("[ENFORCEMENT PROOF] Kernel blocked fork(): %s (errno: %d)\n",
+                   strerror(errno), errno);
+        }
+
+        // Loop to consume CPU for the top screenshot
+        while (1) {
+            // burning CPU
+        }
+    } else {
+        // Parent: move child into cgroup
+        fd = open("/sys/fs/cgroup/mygroup/cgroup.procs", O_WRONLY);
+        char buf[16];
+        sprintf(buf, "%d", pid);
+        write(fd, buf, strlen(buf));
+        close(fd);
+
+        printf("Child 1 moved to /sys/fs/cgroup/mygroup/cgroup.procs\n");
+        printf("Waiting 15 seconds. Check 'top' in another window now!\n");
+
+        sleep(15);
+
+        // Terminate child and clean up
+        kill(pid, SIGKILL);
+        wait(NULL);
+
+        rmdir("/sys/fs/cgroup/mygroup");
+        printf("Done and cleaned up.\n");
+    }
+
+    return 0;
+}
